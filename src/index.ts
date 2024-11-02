@@ -12,11 +12,17 @@ interface UserBalance {
 interface InrBalanceType {
     [userId: string]: UserBalance
 }
-const INR_BALANCES: InrBalanceType = {};
+const INR_BALANCES: InrBalanceType = {
+       
+};
 
 //ORDERBOOK
+type UserOrderType = "direct" | "indirect"
 interface OrderType {
-    [userId: string]: number
+    [userId: string]: {
+        quantity: number,
+        type: UserOrderType
+    }
 }
 interface StockType {
     [price: string]: {
@@ -31,7 +37,9 @@ type StockSymbolType = {
 interface OrderbookType {
     [stockSymbol: string]: StockSymbolType
 }
-const ORDERBOOK: OrderbookType = {};
+const ORDERBOOK: OrderbookType = {
+    
+};
 
 //STOCK_BALANCES
 
@@ -49,7 +57,9 @@ interface UserType {
 interface StockBalancesType {
     [userId: string]: UserType
 }
-const STOCK_BALANCES: StockBalancesType = {}
+const STOCK_BALANCES: StockBalancesType = {
+    
+}
 
 app.post('/user/create/:userId', (req, res) => {
     const {userId} = req.params;
@@ -155,6 +165,142 @@ app.get('/balance/stock/:userId', (req, res) => {
     res.json(STOCK_BALANCES[userId]);
 })
 
+function placeReverseOrders(userId: string, stockSymbol: string, stockType: A, quantity: number, price: number){
+    const reversedStockType = stockType === "yes" ? "no" : "yes"
+    const complementPrice = 10 - price;
+    console.log("inside Place order")
+    if(quantity){
+        if(!ORDERBOOK[stockSymbol][reversedStockType][complementPrice]){
+            ORDERBOOK[stockSymbol][reversedStockType][complementPrice] = {
+                total: 0,
+                orders: {
+                    [userId]: {
+                        quantity: 0,
+                        type: "indirect"
+                    } 
+                }
+            }
+        }
+        console.log("before total", ORDERBOOK[stockSymbol][reversedStockType][complementPrice].total)
+        ORDERBOOK[stockSymbol][reversedStockType][complementPrice].total += quantity;
+        console.log("after total before orders")
+        ORDERBOOK[stockSymbol][reversedStockType][complementPrice].orders[userId].quantity += quantity
+        ORDERBOOK[stockSymbol][reversedStockType][complementPrice].orders[userId].type = "indirect";
+    }
+}
+
+function matchOrders(userId: string, price: number, quantity: number, stockSymbol: string, stockType: A){
+    const availablePricesInOrderbook = ORDERBOOK[stockSymbol][stockType];
+    
+    let remainingQuantity = quantity;
+    console.log("availablepricesin order book ",availablePricesInOrderbook); 
+    Object.keys(availablePricesInOrderbook).forEach(availablePrice => {
+        if(parseInt(availablePrice) <= price && remainingQuantity > 0){
+            const availableQuantity = availablePricesInOrderbook[availablePrice].total;
+            let matchedQuantity = Math.min(availableQuantity, remainingQuantity);
+            console.log(matchedQuantity);
+            const pendingOrders = availablePricesInOrderbook[availablePrice].orders;
+            console.log(pendingOrders);
+            Object.keys(pendingOrders).forEach(pendingOrderUserId => {
+                const pendingOrderQuantity = pendingOrders[pendingOrderUserId].quantity;
+                const pendingOrderType = pendingOrders[pendingOrderUserId].type;
+
+                if(matchedQuantity <= pendingOrderQuantity && remainingQuantity > 0){
+                    if(pendingOrderType === "direct"){
+                        STOCK_BALANCES[pendingOrderUserId][stockSymbol][stockType].locked -= matchedQuantity;
+                        STOCK_BALANCES[userId][stockSymbol][stockType].quantity += matchedQuantity;
+                        const transactionAmount = price * matchedQuantity;
+                        INR_BALANCES[userId].locked -= transactionAmount;
+                        INR_BALANCES[pendingOrderUserId].balance += transactionAmount;
+                        pendingOrders[pendingOrderUserId].quantity -= matchedQuantity;
+                        remainingQuantity -= matchedQuantity;
+                        return "Orders have been fulfilled."
+                    }
+                    if(pendingOrderType === "indirect"){
+                        console.log("indirect")
+                        const reverseOfPendingOrderStockType = stockType === "yes" ? "no" : "yes";
+                        const complementOfPendingOrderPrice = 10 - price;
+                        console.log("before INR transaction")
+                        INR_BALANCES[pendingOrderUserId].locked -= complementOfPendingOrderPrice * matchedQuantity;
+                        INR_BALANCES[userId].locked -= price * matchedQuantity;
+                        if(!STOCK_BALANCES[pendingOrderUserId][stockSymbol]){
+                           console.log("not available stock symbol in user")
+                           STOCK_BALANCES[pendingOrderUserId][stockSymbol] = {
+                                "yes": {
+                                    quantity: 0,
+                                    locked: 0,
+                                },
+                                "no": {
+                                    quantity: 0,
+                                    locked: 0
+                                }
+                           }
+                        }
+                        if(!STOCK_BALANCES[userId][stockSymbol]){
+                            console.log("not available stock symbol in user")
+                            STOCK_BALANCES[userId][stockSymbol] = {
+                                 "yes": {
+                                     quantity: 0,
+                                     locked: 0,
+                                 },
+                                 "no": {
+                                     quantity: 0,
+                                     locked: 0
+                                 }
+                            }
+                         }
+                        console.log("before stock transaction.",STOCK_BALANCES[pendingOrderUserId][stockSymbol])
+                        STOCK_BALANCES[pendingOrderUserId][stockSymbol][reverseOfPendingOrderStockType].quantity += matchedQuantity;
+                        STOCK_BALANCES[userId][stockSymbol][stockType].quantity += matchedQuantity;
+                        console.log("before pending order", pendingOrders)
+                        pendingOrders[pendingOrderUserId].quantity -= matchedQuantity;
+                        availablePricesInOrderbook[availablePrice].total -= matchedQuantity;
+                        console.log("after pending order", pendingOrders);
+                        remainingQuantity -= matchedQuantity;
+                        
+                        return "Orders have been fulfilled"
+                    }
+                }
+                if(matchedQuantity > pendingOrderQuantity){
+                    if(pendingOrderType === "direct"){
+                        //stock transfer
+                        STOCK_BALANCES[pendingOrderUserId][stockSymbol][stockType].locked -= pendingOrderQuantity;
+                        STOCK_BALANCES[userId][stockSymbol][stockType].quantity += pendingOrderQuantity;
+
+                        //money transfer
+                        const transactionAmount = price * matchedQuantity;
+                        INR_BALANCES[userId].locked -= transactionAmount;
+                        INR_BALANCES[pendingOrderUserId].balance += transactionAmount;
+                        pendingOrders[pendingOrderUserId].quantity -= pendingOrderQuantity;
+                        
+                        remainingQuantity -= pendingOrderQuantity;
+                        matchedQuantity -= pendingOrderQuantity;
+                    }
+
+                    if(pendingOrderType === "indirect"){
+                        const reverseOfPendingOrderStockType = stockType === "yes" ? "no" : "yes";
+                        const complementOfPendingOrderPrice = 10 - price;
+                        STOCK_BALANCES[pendingOrderUserId][stockSymbol][reverseOfPendingOrderStockType].quantity += pendingOrderQuantity;
+                        STOCK_BALANCES[userId][stockSymbol][stockType].quantity += pendingOrderQuantity;
+
+                        INR_BALANCES[pendingOrderUserId].locked -= complementOfPendingOrderPrice * matchedQuantity;
+                        INR_BALANCES[userId].locked -= price * matchedQuantity;
+
+                        remainingQuantity -= pendingOrderQuantity;
+                        matchedQuantity -= pendingOrderQuantity;
+
+                    }
+                }
+            })
+
+        }
+    })
+
+    console.log("remaing quantity before placereverseorder", remainingQuantity);
+    if(remainingQuantity){
+        placeReverseOrders(userId, stockSymbol, stockType, remainingQuantity, price);
+    }  
+}
 app.post('/order/buy', (req, res) => {
      
     const userId = req.body.userId as string;
@@ -179,57 +325,27 @@ app.post('/order/buy', (req, res) => {
     INR_BALANCES[userId].balance -= totalCost;
     INR_BALANCES[userId].locked += totalCost;
 
+    //check if stock is listed or not in orderbook
     if(!ORDERBOOK[stockSymbol]){
         res.json({
-            message: "Symbol doesn't exist."
-        })
-    }
-    if(!ORDERBOOK[stockSymbol][stockType]){
-        res.json({
-            message: "dos not exist."
+            message: "This stock has been removed or expired."
         })
         return
     }
-    
-    //reverse the order with price and stockType
-    const reversedStockType = stockType === "yes" ? "no" : "yes";
-    const reversedPrice = 10 - price;
-    //initializing the orderbook with stocktype at a reverse price and default value
-    const orderbook = ORDERBOOK[stockSymbol][reversedStockType];
-    if(!orderbook[reversedPrice]){
-        orderbook[reversedPrice]={
-            total: 0,
-            orders: {
-                [userId]: 0
-            }
-        };
-        orderbook[reversedPrice].total += quantity;
-        orderbook[reversedPrice]["orders"][userId] += quantity;
+
+    const orderBookWithStockSymStockType = ORDERBOOK[stockSymbol][stockType];
+
+    const isOrderbookPricesEmpty = !Object.keys(orderBookWithStockSymStockType).length;
+    console.log(isOrderbookPricesEmpty);
+    if(isOrderbookPricesEmpty){
+        console.log("is empty");
+        placeReverseOrders(userId, stockSymbol, stockType, quantity, price);
         res.json({
-            message: "You order has been placed."
+            message: "You have placed the first order."
         })
         return
-    }else {
-        //matching the reverse order
-        const availablePrices = ORDERBOOK[stockSymbol][stockType];
-        const sortedPrices = Object.keys(availablePrices).map(Number).sort((a,b) => a - b)
-        const remainingQuantity = quantity;
-        for(const orderPrice of sortedPrices){
-            if((stockType === "yes" && orderPrice > price)){
-                break;
-            }
-            const orders = availablePrices[orderPrice];
-
-            for(const [orderUser , orderQuantity] of Object.entries(orders)){
-                console.log("1." + orderUser + "2" + orderQuantity)
-                // const matchedQuantity = Math.min(remainingQuantity, )
-            }
-            
-        }
-       
     }
-
-
+    matchOrders(userId,price, quantity, stockSymbol, stockType);
     res.json({
         message: "Order Placed.",
         ORDERBOOK
