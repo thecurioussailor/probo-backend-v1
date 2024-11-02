@@ -352,6 +352,96 @@ app.post('/order/buy', (req, res) => {
     })
 })
 
+
+//matching sell orders
+
+function matchingSellOrders(userId: string, price: number, quantity: number, stockSymbol: string, stockType: A){
+
+    const orderbookPendingOrderPrices = ORDERBOOK[stockSymbol][stockType];
+    console.log(orderbookPendingOrderPrices)
+    let remainingQuantity = quantity;
+    Object.keys(orderbookPendingOrderPrices).sort().reverse().forEach( orderPrice => {
+        if(parseInt(orderPrice) >= price){
+            const pendingOrders = orderbookPendingOrderPrices[orderPrice].orders;
+            const availableQuantity = orderbookPendingOrderPrices[orderPrice].total;
+            let matchedQuantity = Math.min(availableQuantity, remainingQuantity);
+            console.log("userIds for pending orders",pendingOrders);
+            Object.keys(pendingOrders).forEach( pendingOrderUserId => {
+                const pendingOrderQuantity = pendingOrders[pendingOrderUserId].quantity;
+                const pendingOrderType = pendingOrders[pendingOrderUserId].type;
+                if(pendingOrderType === "indirect"){
+                    if(matchedQuantity <= pendingOrderQuantity){
+                        const reversedStockType = stockType === "yes" ? "no" : "yes";
+                        STOCK_BALANCES[userId][stockSymbol][stockType].locked -= matchedQuantity;
+                        STOCK_BALANCES[pendingOrderUserId][stockSymbol][reversedStockType].quantity += matchedQuantity;
+                        INR_BALANCES[userId].balance += matchedQuantity * price;
+                        INR_BALANCES[pendingOrderUserId].locked -= matchedQuantity * price;
+                        ORDERBOOK[stockSymbol][stockType][orderPrice].total -= matchedQuantity;
+                        ORDERBOOK[stockSymbol][stockType][orderPrice].orders[pendingOrderUserId].quantity -= matchedQuantity;
+                        remainingQuantity -= matchedQuantity;
+                    }
+                }
+            })
+        }
+    });
+
+    if(remainingQuantity){
+        ORDERBOOK[stockSymbol][stockType][price].total += quantity;
+        ORDERBOOK[stockSymbol][stockType][price].orders[userId].quantity += quantity;
+        ORDERBOOK[stockSymbol][stockType][price].orders[userId].type = "direct"
+    }
+    
+}
+app.post('/order/sell', (req, res) => {
+    const userId = req.body.userId as string;
+    const stockSymbol = req.body.stockSymbol as string;
+    const quantity = req.body.quantity as number;
+    const price = req.body.price as number;
+    const stockType = req.body.stockType as A;
+
+    if(!userId || !stockSymbol || !quantity || !price || !stockType)
+        if(!INR_BALANCES[userId]){
+            res.json("User does not exist.")
+    }
+    console.log(STOCK_BALANCES[userId]);
+    if(!STOCK_BALANCES[userId][stockSymbol]){
+        console.log("you dont have stocks.")
+    }
+
+    if(STOCK_BALANCES[userId][stockSymbol][stockType].quantity < quantity){
+        console.log("you dont have enough stocks to sell")
+    }
+
+    STOCK_BALANCES[userId][stockSymbol][stockType].quantity -= quantity;
+    STOCK_BALANCES[userId][stockSymbol][stockType].locked += quantity;
+
+    console.log("orderbook with stock symbol", ORDERBOOK[stockSymbol])
+    console.log("orderbook with symbol with type", ORDERBOOK[stockSymbol][stockType])
+    if(!ORDERBOOK[stockSymbol][stockType][price]){
+        ORDERBOOK[stockSymbol][stockType][price] = {
+            total: 0,
+            orders: {
+                [userId]: {
+                    quantity: 0,
+                    type: "direct"
+                }
+            }
+        }
+    }
+    console.log("orderbook with symbol type and price", ORDERBOOK[stockSymbol][stockType][price])
+    matchingSellOrders(userId, price, quantity, stockSymbol, stockType);
+    res.json({
+        message: "Sell order placed successfully.",
+        ORDERBOOK
+    })
+})
+
+app.get('/orderbook/:stockSymbol', (req, res) => {
+    const { stockSymbol } = req.params;
+
+    res.json(ORDERBOOK[stockSymbol]);
+})
+
 app.post('/trade/mint', (req, res) => {
     const { userId, stockSymbol , quantity} = req.body;
 
