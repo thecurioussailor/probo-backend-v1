@@ -96,7 +96,7 @@ app.post('/symbol/create/:stockSymbol', (req, res) => {
     }
     res.json({
         message: "Symbol created successfully."
-    })
+    })  
 })
 
 app.get('/orderbook', (req, res) => {
@@ -268,7 +268,7 @@ function matchOrders(userId: string, price: number, quantity: number, stockSymbo
                         STOCK_BALANCES[userId][stockSymbol][stockType].quantity += pendingOrderQuantity;
 
                         //money transfer
-                        const transactionAmount = price * matchedQuantity;
+                        const transactionAmount = price * pendingOrderQuantity;
                         INR_BALANCES[userId].locked -= transactionAmount;
                         INR_BALANCES[pendingOrderUserId].balance += transactionAmount;
                         pendingOrders[pendingOrderUserId].quantity -= pendingOrderQuantity;
