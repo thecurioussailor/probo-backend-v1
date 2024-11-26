@@ -280,11 +280,39 @@ function matchOrders(userId: string, price: number, quantity: number, stockSymbo
                     if(pendingOrderType === "indirect"){
                         const reverseOfPendingOrderStockType = stockType === "yes" ? "no" : "yes";
                         const complementOfPendingOrderPrice = 10 - price;
+
+                        if(!STOCK_BALANCES[pendingOrderUserId][stockSymbol]){
+                            console.log("not available stock symbol in user")
+                            STOCK_BALANCES[pendingOrderUserId][stockSymbol] = {
+                                 "yes": {
+                                     quantity: 0,
+                                     locked: 0,
+                                 },
+                                 "no": {
+                                     quantity: 0,
+                                     locked: 0
+                                 }
+                            }
+                         }
+                         if(!STOCK_BALANCES[userId][stockSymbol]){
+                             console.log("not available stock symbol in user")
+                             STOCK_BALANCES[userId][stockSymbol] = {
+                                  "yes": {
+                                      quantity: 0,
+                                      locked: 0,
+                                  },
+                                  "no": {
+                                      quantity: 0,
+                                      locked: 0
+                                  }
+                             }
+                          }
+                          
                         STOCK_BALANCES[pendingOrderUserId][stockSymbol][reverseOfPendingOrderStockType].quantity += pendingOrderQuantity;
                         STOCK_BALANCES[userId][stockSymbol][stockType].quantity += pendingOrderQuantity;
 
-                        INR_BALANCES[pendingOrderUserId].locked -= complementOfPendingOrderPrice * matchedQuantity;
-                        INR_BALANCES[userId].locked -= price * matchedQuantity;
+                        INR_BALANCES[pendingOrderUserId].locked -= complementOfPendingOrderPrice * pendingOrderQuantity;
+                        INR_BALANCES[userId].locked -= price * pendingOrderQuantity;
 
                         remainingQuantity -= pendingOrderQuantity;
                         matchedQuantity -= pendingOrderQuantity;
